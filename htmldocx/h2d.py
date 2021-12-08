@@ -64,6 +64,53 @@ def fetch_image(url):
     except urllib.error.URLError:
         return None
 
+# CODE TAKEN FROM https://github.com/erezlife/html2docx/blob/master/html2docx/image.py
+# FOLLOWING ADVICE HERE https://github.com/pqzx/html2docx/issues/12#issuecomment-848819932
+
+import base64
+import binascii
+from typing import Dict, Optional, cast
+from docx.image.exceptions import UnrecognizedImageError
+from docx.image.image import Image
+
+RFC_2397_BASE64 = ";base64"
+
+def make_image(data: Optional[bytes]) -> io.BytesIO:
+    image_buffer = None
+    if data:
+        image_buffer = io.BytesIO(data)
+        try:
+            Image.from_blob(image_buffer.getbuffer())
+        except UnrecognizedImageError:
+            image_buffer = None
+
+    if not image_buffer:
+        broken_img_path = pathlib.Path(__file__).parent / "image-broken.png"
+        image_buffer = io.BytesIO(broken_img_path.read_bytes())
+
+    return image_buffer
+
+def load_inline_image(src: str) -> Optional[bytes]:
+    image_data = None
+    header_data = src.split(RFC_2397_BASE64 + ",", maxsplit=1)
+    if len(header_data) == 2:
+        data = header_data[1]
+        try:
+            image_data = base64.b64decode(data, validate=True)
+        except (binascii.Error, ValueError):
+            # binascii.Error: Character outside of base64 set.
+            # ValueError: Character outside of ASCII.
+            pass
+    return image_data
+
+def load_image(src: str) -> io.BytesIO:
+    image_bytes = (
+        load_inline_image(src) if src.startswith("data:") else load_external_image(src)
+    )
+    return make_image(image_bytes)
+
+# END OF CODE TAKEN FROM https://github.com/erezlife/html2docx/blob/master/html2docx/image.py
+    
 def remove_last_occurence(ls, x):
     ls.pop(len(ls) - ls[::-1].index(x) - 1)
 
@@ -304,7 +351,8 @@ class HtmlToDocx(HTMLParser):
             except urllib.error.URLError:
                 image = None
         else:
-            image = src
+            # image = src # MODIFIED TO SOLVE THIS ISSUE: https://github.com/pqzx/html2docx/issues/12
+            image = load_image(src) # TAKEN FROM https://github.com/erezlife/html2docx/blob/master/html2docx/image.py 
         # add image to doc
         if image:
             try:
